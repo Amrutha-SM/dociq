@@ -1,0 +1,320 @@
+# DocIQ — AI Document Intelligence System
+# Cursor AI Project Rules & Description
+# =========================================
+# Paste this entire file as .cursorrules in the project root.
+# Cursor will use it as persistent context for every suggestion.
+
+## WHAT THIS PROJECT IS
+
+DocIQ is a full-stack AI-powered document intelligence platform.
+Users upload PDF, image (PNG/JPG/WEBP), or text (TXT/CSV/MD) files.
+The system sends those files to the Anthropic Claude API (claude-sonnet-4-20250514),
+extracts structured information (summary, entities, key fields, sentiment, tables),
+stores everything in PostgreSQL, and lets users have a follow-up Q&A conversation
+with their document via a chat interface.
+
+## TECH STACK — EXACT VERSIONS
+
+Backend:
+  - Runtime:     Node.js 18+ (ES Modules — "type": "module" in package.json)
+  - Framework:   Express 4.x
+  - ORM:         Prisma 5.x with PostgreSQL
+  - AI:          @anthropic-ai/sdk (claude-sonnet-4-20250514)
+  - File upload: Multer (memoryStorage — no disk writes on backend)
+  - File CDN:    Cloudinary v2 SDK + streamifier
+  - Auth:        jsonwebtoken (JWT, HS256, 7d expiry) + bcryptjs
+  - Security:    helmet, cors, express-rate-limit
+  - Errors:      express-async-errors (wraps all async route handlers)
+  - Logging:     morgan
+  - Config:      dotenv
+
+Frontend:
+  - Framework:  React 18 + Vite
+  - HTTP:       axios
+  - Routing:    react-router-dom v6
+  - Dropzone:   react-dropzone
+  - Icons:      lucide-react
+
+Database:
+  - PostgreSQL (Railway managed in production, local in dev)
+  - Prisma migrations (never use db push in production)
+
+Deployment:
+  - Backend + DB: Railway (auto-deploy from GitHub main branch)
+  - Frontend:     Render (static site, auto-deploy from GitHub main branch)
+
+## MONOREPO FOLDER STRUCTURE
+
+dociq/                          ← git root
+├── .cursorrules                ← THIS FILE
+├── .gitignore
+├── README.md
+│
+├── backend/
+│   ├── package.json            ← "type": "module", engines.node >= 18
+│   ├── .env                    ← never committed
+│   ├── .env.example            ← committed, no secrets
+│   ├── Procfile                ← web: npm start
+│   ├── railway.json            ← Railway deploy config
+│   │
+│   ├── prisma/
+│   │   └── schema.prisma       ← single source of truth for DB schema
+│   │
+│   └── src/
+│       ├── app.js              ← Express app entry point
+│       ├── config/
+│       │   └── index.js        ← reads .env, validates required vars, exports config object
+│       ├── middleware/
+│       │   ├── auth.js         ← requireAuth() JWT guard, generateToken()
+│       │   ├── errorHandler.js ← global Express error handler
+│       │   └── upload.js       ← multer config, MIME allowlist, size limit
+│       ├── routes/
+│       │   ├── documents.js    ← POST /upload, GET /, GET /:id, DELETE /:id
+│       │   ├── extractions.js  ← GET /:documentId
+│       │   └── chat.js         ← POST /, GET /:sessionId
+│       └── services/
+│           ├── claudeService.js ← ALL Anthropic API calls live here
+│           └── fileService.js   ← Cloudinary upload/delete, getFileType()
+│
+└── frontend/
+    ├── package.json
+    ├── vite.config.js
+    ├── .env                    ← VITE_API_URL=http://localhost:4000/api
+    ├── .env.production         ← VITE_API_URL=https://your-backend.railway.app/api
+    ├── render.yaml             ← Render deploy config
+    └── src/
+        ├── main.jsx
+        ├── App.jsx
+        ├── index.css
+        ├── api/
+        │   └── client.js       ← all axios calls, one function per endpoint
+        ├── components/
+        │   ├── UploadZone.jsx
+        │   ├── ResultsPanel.jsx
+        │   └── ChatPanel.jsx
+        └── pages/
+            └── Dashboard.jsx   ← main page, composes all components
+
+## DATABASE SCHEMA (Prisma)
+
+Four models. Never add columns without a Prisma migration.
+
+model Document {
+  id           String         @id @default(uuid())
+  filename     String                          -- stored/CDN name
+  originalName String                          -- user's original filename
+  fileType     FileType       (pdf|image|text)
+  fileSize     Int                             -- bytes
+  fileUrl      String                          -- Cloudinary URL or "local"
+  publicId     String?                         -- Cloudinary public_id for deletion
+  status       DocumentStatus (PENDING|PROCESSING|DONE|ERROR)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  extraction   Extraction?
+  chatSessions ChatSession[]
+}
+
+model Extraction {
+  id              String    @id @default(uuid())
+  documentId      String    @unique
+  documentTitle   String?
+  documentType    String?   -- "Invoice", "Contract", "Report", etc.
+  language        String?
+  confidence      Float?    -- 0.0 to 1.0
+  wordCount       Int?
+  pageCount       Int?
+  summaryBrief    String?
+  keyPoints       Json?     -- String[]
+  entities        Json?     -- { persons[], organizations[], locations[], dates[], monetary_values[] }
+  keyInformation  Json?     -- [{ field: string, value: string, confidence: float }]
+  sentiment       Json?     -- { overall: "positive"|"neutral"|"negative", score: float, tone: string }
+  tables          Json?     -- [{ title: string, headers: string[], rows: string[][] }]
+  rawJson         Json?     -- full Claude JSON response, stored for debugging
+  extractionNotes String?
+  createdAt       DateTime  @default(now())
+  document        Document  @relation(...)
+}
+
+model ChatSession {
+  id         String   @id @default(uuid())
+  documentId String
+  messages   Json     @default("[]")
+  -- message shape: [{ role: "user"|"assistant", content: string, timestamp: ISO string }]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  document   Document @relation(...)
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  apiKey       String?  @unique @default(uuid())
+  createdAt    DateTime @default(now())
+}
+
+## API ROUTES
+
+All routes are prefixed with /api
+
+GET    /api/health                     -- liveness check, no auth
+POST   /api/documents/upload           -- multipart/form-data: file + options (JSON string)
+GET    /api/documents/                 -- list last 50 documents (newest first)
+GET    /api/documents/:id              -- single document + extraction relation included
+DELETE /api/documents/:id              -- deletes DB row + Cloudinary asset
+GET    /api/extractions/:documentId    -- get extraction for a document
+POST   /api/chat/                      -- body: { documentId, message, sessionId? }
+GET    /api/chat/:sessionId            -- load previous session messages
+
+## UPLOAD + EXTRACTION FLOW
+
+1. Client POSTs multipart form: file (binary) + options (JSON string)
+   options shape: { summary, entities, keyinfo, sentiment, tables, customPrompt }
+2. Multer stores file in memory (req.file.buffer)
+3. Route calls fileService.uploadToCloudinary(buffer, mimetype, originalName)
+   → returns { url, publicId } (or { url: null, publicId: null } if Cloudinary not configured)
+4. Route creates Document row with status PROCESSING
+5. Route calls claudeService.runExtraction(buffer, mimetype, fileType, opts)
+   → builds Claude message (image/document/text block depending on fileType)
+   → calls claude-sonnet-4-20250514 with max_tokens: 2000
+   → parses JSON response (strips any markdown fences)
+6. Route creates Extraction row with all parsed fields
+7. Route updates Document status to DONE (or ERROR on failure)
+8. Route returns the full Document + Extraction as JSON
+
+## CLAUDE API USAGE RULES
+
+Model:      claude-sonnet-4-20250514  (never change this)
+Max tokens: 2000 for extraction, 1000 for chat
+System:     Always pass a system prompt. Never inline instructions in user turn.
+
+For PDFs:   content block type = "document", source.media_type = "application/pdf"
+For images: content block type = "image", source.media_type = e.g. "image/png"
+For text:   content block type = "text", embed raw text in the prompt string
+All file data: base64 encoded from buffer.toString('base64')
+
+Extraction system prompt instructs Claude to return ONLY valid JSON, no markdown.
+After receiving response, always strip ```json and ``` before JSON.parse().
+Store rawJson in DB for debugging — never throw away the original response.
+
+Claude chat uses extraction fields (not rawJson) as context in system prompt.
+History is passed as messages array: [{ role, content }] (timestamps stripped).
+
+## ENVIRONMENT VARIABLES
+
+Backend (.env):
+  DATABASE_URL         postgresql://user:pass@host:5432/dociq
+  ANTHROPIC_API_KEY    sk-ant-...
+  JWT_SECRET           min 32 random chars
+  PORT                 4000
+  NODE_ENV             development | production
+  ALLOWED_ORIGINS      comma-separated, e.g. http://localhost:5173,https://app.onrender.com
+  MAX_FILE_SIZE_MB     10
+  CLOUDINARY_CLOUD_NAME
+  CLOUDINARY_API_KEY
+  CLOUDINARY_API_SECRET
+
+Frontend (.env):
+  VITE_API_URL         http://localhost:4000/api
+
+Frontend (.env.production):
+  VITE_API_URL         https://your-backend.railway.app/api
+
+## CODING CONVENTIONS
+
+Language:
+  - Backend: ES Modules (import/export), async/await everywhere, no callbacks
+  - Frontend: React functional components + hooks only, no class components
+  - No TypeScript (plain JS throughout)
+
+Error handling:
+  - All route handlers are async. express-async-errors auto-catches rejected promises.
+  - Throw plain Error objects with a .status property for HTTP errors.
+  - Global errorHandler middleware in src/middleware/errorHandler.js handles all errors.
+  - Prisma P2025 (not found) → 404. Multer LIMIT_FILE_SIZE → 400.
+  - In production, never expose stack traces to the client.
+
+Prisma:
+  - Always use prisma.model.findUniqueOrThrow / findFirstOrThrow instead of manual null checks.
+  - Never use db push in production. Always use prisma migrate deploy.
+  - Single PrismaClient instance per process. Import from a shared db.js if refactoring.
+  - Include relations only when needed (use select for list endpoints).
+
+File handling:
+  - Multer uses memoryStorage. Files never touch the filesystem on the server.
+  - Always stream buffer directly to Cloudinary via streamifier.
+  - If Cloudinary is not configured (empty env vars), skip upload gracefully.
+  - Supported MIME types: application/pdf, image/png, image/jpeg, image/webp,
+    text/plain, text/csv, text/markdown.
+
+Security:
+  - helmet() on all responses.
+  - CORS restricted to ALLOWED_ORIGINS env var (split by comma).
+  - Rate limit: 100 requests per 15 minutes on /api/.
+  - JWT secret from env, never hardcoded. Token expiry: 7 days.
+  - Passwords hashed with bcryptjs (saltRounds: 12).
+  - File size capped at MAX_FILE_SIZE_MB. MIME checked in multer fileFilter.
+
+Frontend API calls:
+  - All in src/api/client.js. One named export per endpoint.
+  - Axios baseURL from import.meta.env.VITE_API_URL.
+  - Timeout: 90000ms (extractions can take up to 30s).
+  - Multipart: always use FormData, set Content-Type: multipart/form-data.
+  - options field is always JSON.stringify'd before appending to FormData.
+
+## DEPLOYMENT RULES
+
+Railway (backend):
+  - Deploy from /backend subfolder of monorepo.
+  - Start command: npx prisma migrate deploy && npm start
+  - NODE_ENV must be "production".
+  - DATABASE_URL is auto-injected by Railway from the linked PostgreSQL service.
+  - ALLOWED_ORIGINS must include the Render frontend URL.
+
+Render (frontend):
+  - Deploy from /frontend subfolder.
+  - Build: npm install && npm run build
+  - Publish dir: dist
+  - SPA rewrite rule: /* → /index.html
+  - VITE_API_URL must point to the Railway backend URL.
+
+Both services auto-deploy on push to main branch via GitHub integration.
+
+## COMMON TASKS FOR CURSOR
+
+Adding a new extraction field:
+  1. Add column to Extraction model in schema.prisma
+  2. Run: npx prisma migrate dev --name add_<field>
+  3. Update claudeService.js EXTRACTION_SYSTEM prompt to include the field in JSON spec
+  4. Parse and store the new field in the documents.js route (runExtraction result)
+  5. Expose it in extractions.js GET route response
+  6. Display it in frontend ResultsPanel.jsx
+
+Adding a new API route:
+  1. Create src/routes/newroute.js
+  2. Import and mount in src/app.js: app.use('/api/newroute', newRouter)
+  3. All handlers must be async. Use express-async-errors (already installed).
+  4. Add corresponding function to frontend/src/api/client.js
+
+Changing the Claude model:
+  - Only change in src/services/claudeService.js, in the two client.messages.create calls.
+  - Never hardcode the model string anywhere else.
+
+Running locally:
+  Backend:  cd backend && npm run dev   (nodemon, port 4000)
+  Frontend: cd frontend && npm run dev  (vite, port 5173)
+  DB UI:    cd backend && npx prisma studio  (port 5555)
+
+## WHAT NOT TO DO
+
+- Never write files to disk on the backend (Multer uses memoryStorage).
+- Never commit .env files (they are gitignored).
+- Never use require() — project is ES Modules throughout.
+- Never call client.messages.create outside of claudeService.js.
+- Never expose rawJson in list endpoints (too large). Only in GET /documents/:id.
+- Never use prisma.model.findUnique without handling the null case,
+  or just use findUniqueOrThrow instead.
+- Never run prisma db push in production. Use prisma migrate deploy.
+- Never hardcode CORS origins, API keys, or JWT secrets.
+- Never put business logic inside route files — routes call services, services do work. 

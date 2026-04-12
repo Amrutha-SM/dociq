@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  DONE
+  ERROR
+}
+
+enum FileType {
+  pdf
+  image
+  text
+}
+
+model Document {
+  id           String         @id @default(uuid())
+  filename     String
+  originalName String
+  fileType     FileType
+  fileSize     Int
+  fileUrl      String
+  publicId     String?
+  status       DocumentStatus @default(PENDING)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  extraction   Extraction?
+  chatSessions ChatSession[]
+
+  @@map("documents")
+}
+
+model Extraction {
+  id              String   @id @default(uuid())
+  documentId      String   @unique
+  documentTitle   String?
+  documentType    String?
+  language        String?
+  confidence      Float?
+  wordCount       Int?
+  pageCount       Int?
+  summaryBrief    String?
+  keyPoints       Json?
+  entities        Json?
+  keyInformation  Json?
+  sentiment       Json?
+  tables          Json?
+  rawJson         Json?
+  extractionNotes String?
+  createdAt       DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("extractions")
+}
+
+model ChatSession {
+  id         String   @id @default(uuid())
+  documentId String
+  messages   Json     @default("[]")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("chat_sessions")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  apiKey       String?  @unique @default(uuid())
+  createdAt    DateTime @default(now())
+
+  @@map("users")
+}
