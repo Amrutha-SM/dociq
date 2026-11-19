@@ -75,7 +75,7 @@ async function extractTextFromBuffer(buffer, mimetype, fileType) {
     const dataUrl = `data:${mimetype};base64,${b64}`
     try {
       const response = await groq.chat.completions.create({
-        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        model: 'qwen/qwen3.8-27b',
         messages: [
           {
             role: 'user',
@@ -85,7 +85,7 @@ async function extractTextFromBuffer(buffer, mimetype, fileType) {
             ],
           },
         ],
-        max_tokens: 1000,
+        max_tokens: 3000,
       })
       const text = response.choices[0]?.message?.content || ''
       console.log('Image text extracted, length:', text.length)
