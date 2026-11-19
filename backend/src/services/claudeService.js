@@ -1,8 +1,6 @@
 import Groq from 'groq-sdk'
 import { config } from '../config/index.js'
-import { createRequire } from 'module'
-const require = createRequire(import.meta.url)
-const { PdfReader } = require('pdfreader')
+import { extractText, getDocumentProxy } from 'unpdf'
 
 const groq = new Groq({ apiKey: config.groqKey })
 
@@ -42,20 +40,11 @@ function trimText(text, maxChars = 3500) {
   return cleaned.substring(0, maxChars) + '\n[Content trimmed...]'
 }
 
-function parsePdfBuffer(buffer) {
-  return new Promise((resolve, reject) => {
-    const items = []
-    new PdfReader().parseBuffer(buffer, (err, item) => {
-      if (err) {
-        reject(err)
-      } else if (!item) {
-        // End of file
-        resolve(items.join(' '))
-      } else if (item.text) {
-        items.push(item.text)
-      }
-    })
-  })
+
+async function parsePdfBuffer(buffer) {
+  const pdf = await getDocumentProxy(new Uint8Array(buffer))
+  const { text } = await extractText(pdf, { mergePages: true })
+  return text
 }
 
 async function extractTextFromBuffer(buffer, mimetype, fileType) {
@@ -76,8 +65,8 @@ async function extractTextFromBuffer(buffer, mimetype, fileType) {
       }
       return trimText(text)
     } catch (err) {
-      console.error('PDF parse error:', err.message)
-      return 'PDF parsing failed: ' + err.message
+      console.error('PDF parse error:', err)
+      return 'PDF parsing failed: ' + String(err?.message || err)
     }
   }
 
