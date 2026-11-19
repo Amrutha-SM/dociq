@@ -12,6 +12,8 @@ import chatRouter        from './routes/chat.js'
 
 const app = express()
 
+app.set('trust proxy', 1)
+
 app.use(helmet())
 app.use(cors({
   origin: (origin, cb) => {
@@ -41,10 +43,11 @@ app.use('/api/chat',        chatRouter)
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }))
 app.use(errorHandler)
 
-const PORT = config.port
-app.listen(PORT, () => {
-  console.log(`DocIQ API running on http://localhost:${PORT}`)
-  console.log(`Environment: ${config.nodeEnv}`)
-})
+if (!process.env.VERCEL) {
+  app.listen(config.port, () => {
+    console.log(`DocIQ API running on http://localhost:${config.port}`)
+    console.log(`Environment: ${config.nodeEnv}`)
+  })
+}
 
 export default app

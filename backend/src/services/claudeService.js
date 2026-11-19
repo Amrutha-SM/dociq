@@ -139,9 +139,9 @@ Even if content is partial, extract as much as possible.
 Return only valid JSON, nothing else.`
 
   const response = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
+    model: 'openai/gpt-oss-120b',
     messages: [{ role: 'user', content: prompt }],
-    max_tokens: 1500,
+    max_tokens: 4000,
     temperature: 0.1,
   })
 
@@ -164,7 +164,8 @@ Summary: ${extraction.summaryBrief || 'N/A'}
 Key points: ${JSON.stringify(extraction.keyPoints || []).substring(0, 300)}
 Key info: ${JSON.stringify(extraction.keyInformation || []).substring(0, 300)}
 Entities: ${JSON.stringify(extraction.entities || {}).substring(0, 300)}
-Answer concisely. If not in document, say so.`
+Answer concisely. If not in document, say so.
+Format rules: use short paragraphs and simple "-" bullet lists. Never use HTML tags such as <br>. Do not use tables unless the user asks for one.`
 
   const messages = [
     { role: 'system', content: systemContext },
@@ -176,11 +177,12 @@ Answer concisely. If not in document, say so.`
   ]
 
   const response = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
+    model: 'openai/gpt-oss-120b',
     messages,
-    max_tokens: 500,
+    max_tokens: 1500,
     temperature: 0.3,
   })
 
-  return response.choices[0]?.message?.content || 'Sorry, could not generate a response.'
+  const reply = response.choices[0]?.message?.content || 'Sorry, could not generate a response.'
+  return reply.replace(/<br\s*\/?>/gi, '\n')
 }

@@ -1,8 +1,10 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { uploadDoc, listDocs, deleteDoc, sendChat } from '../api/client'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
-const TABS = ['Results', 'Q&A Chat', 'Raw JSON']
+const TABS = ['Results', 'Q&A Chat']
 const fileIcon = t => ({ pdf: '📄', image: '🖼️', text: '📝' }[t] || '📁')
 const statusColor = s => ({ DONE: '#4ade80', PROCESSING: '#fbbf24', ERROR: '#f87171', PENDING: '#94a3b8' }[s])
 
@@ -259,7 +261,9 @@ export default function Dashboard() {
                       {m.role === 'user' ? '◯' : '⬡'}
                     </div>
                     <div style={{ background: m.role === 'user' ? 'rgba(124,110,247,0.1)' : '#16161a', border: `1px solid ${m.role === 'user' ? 'rgba(124,110,247,0.25)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 10, padding: '9px 13px', fontSize: 12, lineHeight: 1.7, color: '#e8e6f0', maxWidth: '85%' }}>
-                      {m.content}
+                      {m.role === 'assistant'
+                        ? <div className="md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown></div>
+                         : m.content}
                     </div>
                   </div>
                 ))}
@@ -283,24 +287,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* Raw JSON tab */}
-          {tab === 'Raw JSON' && (
-            <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
-              {!ext ? (
-                <div style={{ color: '#8a87a0', textAlign: 'center', marginTop: 60 }}>No data yet</div>
-              ) : (
-                <>
-                  <button onClick={() => navigator.clipboard.writeText(JSON.stringify(ext.rawJson, null, 2))}
-                    style={{ marginBottom: 12, background: '#26262f', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, padding: '5px 12px', color: '#e8e6f0', cursor: 'pointer', fontSize: 11, fontFamily: 'monospace' }}>
-                    Copy JSON
-                  </button>
-                  <pre style={{ background: '#16161a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: 14, fontSize: 11, lineHeight: 1.8, color: '#4ade80', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {JSON.stringify(ext.rawJson, null, 2)}
-                  </pre>
-                </>
-              )}
-            </div>
-          )}
+          
         </div>
       </div>
     </div>
